@@ -90,6 +90,8 @@ sabi_filter |>
 ```{r}
 library("readr")
 library("sf")
+library("dplyr")
+library("ggplot2")
 
 # Load posmo data
 posmo <- read_delim("data/posmo_2023-01-01T00_00_00+01_00-2023-04-28T23_59_59+02_00.csv")
@@ -113,95 +115,212 @@ posmo_filter <- posmo |>
 ```
 
 # Task 1: Segmentation 
-## a) Specify a temporal window v & b) Measure the distance from every point to every other point within this temporal window v
 ```{r}
 # calculates time taken from each step to the next 
 # n_plus2 calculates an offset of 2 time steps
-posmo <- posmo |>
+posmo_filter <- posmo_filter |>
   mutate(
     n_plus1 = sqrt((lead(X) - X)^2 + (lead(Y) - Y)^2), 
     n_plus2 = sqrt((lead(X, 2) - X)^2 + (lead(Y, 2) - Y)^2), 
     n_minus1 = sqrt((lag(X) - X)^2 + (lag(Y) - Y)^2), 
     n_minus2 = sqrt((lag(X, 2) - X)^2 + (lag(Y, 2) - Y)^2) 
   )
-
-# Now we want to calculate the mean distance of nMinus2, nMinus1, nPlus1, nPlus2 for each row
-# ungroup() because when we apply when we apply rowwise() each row is a grouped individually which we don't want. 
-posmo <- posmo |>
-  rowwise()|>
-  mutate(
-    stepMean = mean(c(n_minus1, n_minus2, n_plus1, n_plus2))
-  ) |>
-  ungroup()
-```
-
-
-## c) Remove "static points"
-```{r}
-# look at stepMean values 
-# stepMean usually is between 0 and 75 metres (typical stepmean) (small amount of higher values)
-ggplot(posmo, aes(stepMean)) +
-  geom_histogram(binwidth = 10) +
-  geom_vline(xintercept = mean(posmo$stepMean, na.rm = TRUE))+
-  scale_x_continuous(limits = c(0,400))
-
-# decide on a threshold value in which i consider i am NOT moving
-# static, when the stepMean is lower than the mean of the stepMean 
-posmo |>
-  mutate(static = stepMean < mean(stepMean, na.rm = TRUE))|>
-  ggplot(aes(X, Y)) +
-  geom_point(aes(color = static)) +
-  geom_path() +
-  coord_fixed()
-
-# removes all static (TRUE) points
-posmo_filter2 <- posmo |>
-    filter(!static)
-
-# Visualize results from removed static points 
-posmo_filter |>
-    ggplot(aes(X, Y)) +
-    geom_path() +
-    geom_point() +
-    coord_fixed() +
-    theme(legend.position = "bottom")
 ```
 
 
 # Task 2: Specify and apply threshold d
 ```{r}
+# Now we want to calculate the mean distance of nMinus2, nMinus1, nPlus1, nPlus2 for each row
+# ungroup() because when we apply when we apply rowwise() each row is a grouped individually which we don't want. 
+posmo_filter <- posmo_filter |>
+  rowwise()|>
+  mutate(
+    stepMean = mean(c(n_minus1, n_minus2, n_plus1, n_plus2))
+  ) |>
+  ungroup()
 
+# look at stepMean values 
+# stepMean usually is between 0 and +/- 75 metres (typical stepmean) (small amount of higher values)
+# probably/maybe walking by foot will be edited out
+ggplot(posmo_filter, aes(stepMean)) +
+  geom_histogram(binwidth = 10) +
+  geom_vline(xintercept = mean(posmo$stepMean, na.rm = TRUE))+
+  scale_x_continuous(limits = c(0,400))
 ```
 
 
 # Task 3: Visualize segmented trajectories 
 ```{r}
+# decide on a threshold value in which i consider i am NOT moving
+# static, when the stepMean is lower than the mean of the stepMean 
+posmo_filter <- posmo_filter |>
+  mutate(static = stepMean < mean(stepMean, na.rm = TRUE))
 
+
+# Visualize results
+posmo_filter |>
+    ggplot(aes(X, Y)) +
+    geom_point(aes(col = static)) +
+    coord_fixed() +
+    theme(legend.position = "bottom")
 ```
 
 # Task 4: Segment-based analysis 
 ```{r}
+# function that assigns a unique ID to each segment
 rle_id <- function(vec) {
     x <- rle(vec)$lengths
     as.factor(rep(seq_along(x), times = x))
 }
+
 
 # filter posmo data
 posmo_filter <- posmo_filter |>
     mutate(segment_id = rle_id(static))
 
 head(posmo_filter)
+
+# Visualize results
+p1 <- posmo_filter |>
+    ggplot(aes(X, Y)) +
+    geom_point(aes(col = segment_id)) +
+    coord_fixed() +
+    theme(legend.position = "bottom") +
+  labs(title = "All segments (uncleaned)")
+
+# removes all static (TRUE) points
+posmo_clean <- posmo_filter |>
+    filter(!static)
+
+# Visualize results
+p2 <- posmo_clean |>
+    ggplot(aes(X, Y)) +
+    geom_point(aes(col = segment_id)) +
+    coord_fixed() +
+    theme(legend.position = "bottom") +
+  labs(title = "Long segments (removed segments < 5min)")
+
+
+# Arrange plots vertically
+library(gridExtra)
+grid.arrange(p1, p2, ncol = 1)
 ```
 
 # Task 5: Similarity measures 
 ```{r}
+# Load pedestrian data
+ped <- read_delim("data/pedestrian.csv")
 
+# mutate TrajID into factor for visualization 
+ped <- ped |>
+  mutate(TrajID = as.factor(TrajID))
+
+# visualize different trajectories 
+ggplot(ped, aes(E, N, col = TrajID)) +
+  facet_wrap(~TrajID, labeller = labeller(TrajID = c("1" = "TrajID: 1", "2" = "TrajID: 2", "3" = "TrajID: 3", "4" = "TrajID: 4", "5" = "TrajID: 5", "6" = "TrajID: 6"))) +
+  geom_path() +
+  geom_point() +
+  labs(title = "Visual comparison of the 6 trajectories", subtitle = "Each plot highlights a trajectory") +
+  theme_minimal() +
+  theme(legend.position = "none")
 ```
 
 # Task 6: Calculate similarity 
+Before visualizing your results think about the following: Which two trajectories to you percieve to be most similar, which are most dissimilar? Now visualize the results from the computed similarity measures. Which measure reflects your own intuition the closest?
 ```{r}
+# install.packages("SimilarityMeasures")
+library(SimilarityMeasures)
 
+
+# create matrix from data frame
+# 1. filter out DatetimeUTC, as it has not a double format
+ped_filter <- ped |>
+  select(-DatetimeUTC)
+
+# 2. create matrix
+mat <- as.matrix(ped_filter)
+
+
+# Now compare trajectory 1 to trajectories 2-6 using different similarity measures
+# calculate DTW() w/ trajectory 1 & 2 -------------
+dtw_12 <- DTW(mat[c(1:47), c(2:3)], mat[c(48:95), c(2:3)])
+
+# calculate DTW() w/ trajectory 1 & 3
+dtw_13 <- DTW(mat[c(1:47), c(2:3)], mat[c(96:141), c(2:3)])
+
+# calculate DTW() w/ trajectory 1 & 4
+dtw_14 <- DTW(mat[c(1:47), c(2:3)], mat[c(142:190), c(2:3)])
+
+# calculate DTW() w/ trajectory 1 & 5
+dtw_15 <-DTW(mat[c(1:47), c(2:3)], mat[c(191:242), c(2:3)])
+
+# calculate DTW() w/ trajectory 1 & 6
+dtw_16 <-DTW(mat[c(1:47), c(2:3)], mat[c(243:289), c(2:3)])
+
+# calculate EditDist() w/ trajectory 1 & 2 -------------
+ed_12 <-EditDist(mat[c(1:47),c(2:3)], mat[c(48:95), c(2:3)])
+
+# calculate EditDist() w/ trajectory 1 & 3
+ed_13 <- EditDist(mat[c(1:47), c(2:3)], mat[c(96:141), c(2:3)])
+
+# calculate EditDist() w/ trajectory 1 & 4
+ed_14 <-EditDist(mat[c(1:47), c(2:3)], mat[c(142:190), c(2:3)])
+
+# calculate EditDist() w/ trajectory 1 & 5
+ed_15 <-EditDist(mat[c(1:47), c(2:3)], mat[c(191:242), c(2:3)])
+
+# calculate EditDist() w/ trajectory 1 & 6
+ed_16 <-EditDist(mat[c(1:47), c(2:3)], mat[c(243:289), c(2:3)])
+
+# calculate Frechet() w/ trajectory 1 & 2 -------------
+frech_12 <- Frechet(mat[c(1:47),c(2:3)], mat[c(48:95), c(2:3)])
+
+# calculate Frechet() w/ trajectory 1 & 3
+frech_13 <- Frechet(mat[c(1:47), c(2:3)], mat[c(96:141), c(2:3)])
+
+# calculate Frechet() w/ trajectory 1 & 4
+frech_14 <-Frechet(mat[c(1:47), c(2:3)], mat[c(142:190), c(2:3)])
+
+# calculate Frechet() w/ trajectory 1 & 5
+frech_15 <-Frechet(mat[c(1:47), c(2:3)], mat[c(191:242), c(2:3)])
+
+# calculate Frechet() w/ trajectory 1 & 6
+frech_16 <-Frechet(mat[c(1:47), c(2:3)], mat[c(243:289), c(2:3)])
+
+# calculate LCSS() w/ trajectory 1 & 2 -------------
+lc_12 <- LCSS(mat[c(1:47),c(2:3)], mat[c(48:95), c(2:3)], pointSpacing = 2)
+
+# calculate LCSS() w/ trajectory 1 & 3
+lc_13 <-LCSS(mat[c(1:47), c(2:3)], mat[c(96:141), c(2:3)], pointSpacing = 2)
+
+# calculate LCSS() w/ trajectory 1 & 4
+lc_14 <-LCSS(mat[c(1:47), c(2:3)], mat[c(142:190), c(2:3)], pointSpacing = 2)
+
+# calculate LCSS() w/ trajectory 1 & 5
+lc_15 <-LCSS(mat[c(1:47), c(2:3)], mat[c(191:242), c(2:3)], pointSpacing = 2)
+
+# calculate LCSS() w/ trajectory 1 & 6
+lc_16 <-LCSS(mat[c(1:47), c(2:3)], mat[c(243:289), c(2:3)], pointSpacing = 2)
+
+
+# Which two trajectories to you percieve to be most similar, which are most dissimilar?
+# TrajID 1, 2, 3 and 6 are pretty similar 
+# TrajID 1 and 6 are the most similar out of all trajectories, when checking visually in the plot before 
+
+# make dataframe to plot results
+df <- data.frame(name = c("DTW", "DTW", "DTW", "DTW", "DTW", "EditDist", "EditDist","EditDist", "EditDist", "EditDist", "Frechet", "Frechet", "Frechet", "Frechet", "Frechet", "LCSS", "LCSS", "LCSS", "LCSS", "LCSS"), traj = c(2, 3, 4, 5, 6, 2, 3, 4, 5, 6, 2, 3, 4, 5, 6, 2, 3, 4, 5, 6),
+           result = c(dtw_12, dtw_13, dtw_14, dtw_15, dtw_16, ed_12, ed_13, ed_14, ed_15, ed_16, frech_12, frech_13, frech_14, frech_15, frech_16, lc_12, lc_13, lc_14, lc_15, lc_16))
+
+# convert traj into factors for plot with ggplot
+df$traj <- as.factor(df$traj)
+
+# visualise results 
+ggplot() +
+  geom_bar(data = df, aes(traj, result, fill = traj), stat = "identity") +
+  facet_wrap(~name, scale = "free_y") +
+  labs(title = "Computed similarities using different measures between trajectory 1 and all other trajectories") +
+  theme(legend.position = "none")
+
+# Which measure reflects your own intuition the closest?
+# DTW() and Frechet() reflected the intuition from the visual comparison the most. 
 ```
-
-
-
