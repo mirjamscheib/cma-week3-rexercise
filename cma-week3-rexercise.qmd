@@ -3,103 +3,22 @@ title: "cma-week3-rexercise"
 format: html
 ---
 
-Git Problem; Replace main mit master wenn letzter schritt nicht geht 
 # Pre-preparation 
 ```{r}
-
-```
-
-## a) Specify a temporal window v
-```{r}
-
-```
-
-## b) Measure the distance from every point to every other point within this temporal window v
-```{r}
-sabi <- sabi |>
-    mutate(
-        nMinus2 = sqrt((lag(E, 2) - E)^2 + (lag(N, 2) - N)^2), # distance to pos -30 minutes
-        nMinus1 = sqrt((lag(E, 1) - E)^2 + (lag(N, 1) - N)^2), # distance to pos -15 minutes
-        nPlus1  = sqrt((E - lead(E, 1))^2 + (N - lead(N, 1))^2), # distance to pos +15 mintues
-        nPlus2  = sqrt((E - lead(E, 2))^2 + (N - lead(N, 2))^2) # distance to pos +30 minutes
-    )
-
-# ---------------------------------
-sabi <- sabi |>
-    rowwise() |>
-    mutate(
-        stepMean = mean(c(nMinus2, nMinus1, nPlus1, nPlus2))
-    ) |>
-    ungroup()
-
-sabi
-```
-
-## c) Remove "static points"
-```{r}
-sabi <- sabi |>
-    ungroup() |>
-    mutate(static = stepMean < mean(stepMean, na.rm = TRUE))
-
-sabi_filter <- sabi |>
-    filter(!static)
-
-# ---------------------------------
-sabi_filter |>
-    ggplot(aes(E, N)) +
-    geom_path() +
-    geom_point() +
-    coord_fixed() +
-    theme(legend.position = "bottom")
-```
-
-# Preparation 
-```{r}
-library("readr")
-library("sf")
-
-posmo <- read_delim("datasets/posmo_2022-05-01T00 00 00+02 00-2023-04-18T23 59 59+02 00.csv")
-
-# Keep only the necessary columns
-posmo <- select(posmo, datetime, lon_x, lat_y)
-
-# ------------------------------
-posmo <- st_as_sf(posmo, coords = c("lon_x","lat_y"), crs = 4326) |>
-  st_transform(2056)
-
-head(posmo)
-
-# -------------------------
-posmo_coordinates <- st_coordinates(posmo)
-
-posmo <- cbind(posmo, posmo_coordinates)
-
-# ---------------------------
-posmo_filter <- posmo |>
-    filter(as.Date(datetime) == "2023-03-23")
-```
-
-# Task 1: Segmentation 
-```{r}
+# Load libraries 
 library("readr")
 library("dplyr")
-library("sf")
 library("ggplot2")
 
-# Import the downloaded csv 
-wildschwein_BE <- read_delim("data/wildschwein_BE_2056.csv", ",")
+# Load .csv with wildboar data 
+wildschwein <- read_delim("data/wildschwein_BE_2056.csv", ",")
 
-# to convert it to a spatial object
-# setting remove = FALSE preserves the original (E/N) columns, which come in handy later on
-# wildschwein <- st_as_sf(wildschwein, coords = c("E", "N"), crs = 2056, remove = FALSE) 
-
-# we will be only working with Sabi
+# create subset with only sabi and between a specific timeframe 
 # the safest way is to use POSIXct (instead of dttm) with timezone UTC so you dont have problems with summer/winter time and different timezones
-sabi <- wildschwein_BE |>
-  filter(TierName == "Sabi")|>
-  filter(DatetimeUTC >= as.POSIXct("2015-07-01", tz = "UTC"),
-         DatetimeUTC < as.POSIXct("2015-07-03", tz = "UTC"))
-
+sabi <- wildschwein |>
+    filter(TierName == "Sabi", 
+           DatetimeUTC >= "2015-07-01", 
+           DatetimeUTC < "2015-07-03")
 
 # Visualize segmented data
 ggplot(sabi, aes(E, N, color = DatetimeUTC)) +
@@ -112,17 +31,22 @@ sabi |>
   head(50) |>
   ggplot(aes(DatetimeUTC, 1)) +
   geom_point()
+```
 
+## a) Specify a temporal window v & b) Measure the distance from every point to every other point within this temporal window v
+In the above dataset, the sampling interval is 15 minutes. If we take a temporal window of 60 minutes, that would mean including 4 fixes.
+```{r}
 # calculates time taken from each step to the next 
 # n_plus2 calculates an offset of 2 time steps
 sabi <- sabi |>
   mutate(
-    n_plus1 = sqrt((lead(E) - E)^2 + (lead(N) - N)^2),
-    n_plus2 = sqrt((lead(E, 2) - E)^2 + (lead(N, 2) - N)^2),
-    n_minus1 = sqrt((lag(E) - E)^2 + (lag(N) - N)^2),
-    n_minus2 = sqrt((lag(E, 2) - E)^2 + (lag(N, 2) - N)^2)
+    n_plus1 = sqrt((lead(E) - E)^2 + (lead(N) - N)^2), # distance to pos +15 minutes
+    n_plus2 = sqrt((lead(E, 2) - E)^2 + (lead(N, 2) - N)^2), # distance to pos +30 minutes
+    n_minus1 = sqrt((lag(E) - E)^2 + (lag(N) - N)^2), # distance to pos -30 minutes
+    n_minus2 = sqrt((lag(E, 2) - E)^2 + (lag(N, 2) - N)^2) # distance to pos -15 minutes
   )
 
+# Now we want to calculate the mean distance of nMinus2, nMinus1, nPlus1, nPlus2 for each row
 # ungroup() because when we apply when we apply rowwise() each row is a grouped individually which we don't want. 
 sabi <- sabi |>
   rowwise()|>
@@ -130,7 +54,10 @@ sabi <- sabi |>
     stepMean = mean(c(n_minus1, n_minus2, n_plus1, n_plus2))
   ) |>
   ungroup()
+```
 
+## c) Remove "static points"
+```{r}
 # look at stepMean values 
 # stepMean usually is between 0 and 10 metres (typical stepmean) (small amount of higher values)
 ggplot(sabi, aes(stepMean)) +
@@ -145,7 +72,101 @@ sabi |>
   geom_point(aes(color = static)) +
   geom_path() +
   coord_fixed()
+
+# removes all static (TRUE) points
+sabi_filter <- sabi |>
+    filter(!static)
+
+# Visualize results from removed static points 
+sabi_filter |>
+    ggplot(aes(E, N)) +
+    geom_path() +
+    geom_point() +
+    coord_fixed() +
+    theme(legend.position = "bottom")
 ```
+
+# Preparation 
+```{r}
+library("readr")
+library("sf")
+
+# Load posmo data
+posmo <- read_delim("data/posmo_2023-01-01T00_00_00+01_00-2023-04-28T23_59_59+02_00.csv")
+
+# Keep only the necessary columns
+posmo <- select(posmo, datetime, lon_x, lat_y)
+
+# to calculate eucl. distance, we need our data in CRS 2056 format
+posmo <- st_as_sf(posmo, coords = c("lon_x","lat_y"), crs = 4326) |>
+  st_transform(2056)
+
+# we need the coordinates in separates columns to calculate eucl. distance
+posmo_coordinates <- st_coordinates(posmo)
+
+# add the separated coordinates to the posmo variable 
+posmo <- cbind(posmo, posmo_coordinates)
+
+# choosing 1 day to calculate in the next steps 
+posmo_filter <- posmo |>
+    filter(as.Date(datetime) == "2023-04-10")
+```
+
+# Task 1: Segmentation 
+## a) Specify a temporal window v & b) Measure the distance from every point to every other point within this temporal window v
+```{r}
+# calculates time taken from each step to the next 
+# n_plus2 calculates an offset of 2 time steps
+posmo <- posmo |>
+  mutate(
+    n_plus1 = sqrt((lead(X) - X)^2 + (lead(Y) - Y)^2), 
+    n_plus2 = sqrt((lead(X, 2) - X)^2 + (lead(Y, 2) - Y)^2), 
+    n_minus1 = sqrt((lag(X) - X)^2 + (lag(Y) - Y)^2), 
+    n_minus2 = sqrt((lag(X, 2) - X)^2 + (lag(Y, 2) - Y)^2) 
+  )
+
+# Now we want to calculate the mean distance of nMinus2, nMinus1, nPlus1, nPlus2 for each row
+# ungroup() because when we apply when we apply rowwise() each row is a grouped individually which we don't want. 
+posmo <- posmo |>
+  rowwise()|>
+  mutate(
+    stepMean = mean(c(n_minus1, n_minus2, n_plus1, n_plus2))
+  ) |>
+  ungroup()
+```
+
+
+## c) Remove "static points"
+```{r}
+# look at stepMean values 
+# stepMean usually is between 0 and 75 metres (typical stepmean) (small amount of higher values)
+ggplot(posmo, aes(stepMean)) +
+  geom_histogram(binwidth = 10) +
+  geom_vline(xintercept = mean(posmo$stepMean, na.rm = TRUE))+
+  scale_x_continuous(limits = c(0,400))
+
+# decide on a threshold value in which i consider i am NOT moving
+# static, when the stepMean is lower than the mean of the stepMean 
+posmo |>
+  mutate(static = stepMean < mean(stepMean, na.rm = TRUE))|>
+  ggplot(aes(X, Y)) +
+  geom_point(aes(color = static)) +
+  geom_path() +
+  coord_fixed()
+
+# removes all static (TRUE) points
+posmo_filter2 <- posmo |>
+    filter(!static)
+
+# Visualize results from removed static points 
+posmo_filter |>
+    ggplot(aes(X, Y)) +
+    geom_path() +
+    geom_point() +
+    coord_fixed() +
+    theme(legend.position = "bottom")
+```
+
 
 # Task 2: Specify and apply threshold d
 ```{r}
